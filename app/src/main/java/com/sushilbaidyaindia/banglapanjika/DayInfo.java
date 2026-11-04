@@ -15,6 +15,7 @@ final class DayInfo {
 
     final int year, month, day, weekday;      // month 1-12, weekday 0 = Sunday
     final String method;
+    private Panjika.Result calc;
 
     DayInfo(Calendar c, String method) {
         this.year = c.get(Calendar.YEAR);
@@ -41,16 +42,35 @@ final class DayInfo {
         return weekdayName() + ", " + englishDate();
     }
 
+    private Panjika.Result calc() {
+        if (calc == null) calc = Panjika.compute(year, month, day, method);
+        return calc;
+    }
+
+    private String withEnd(String name, double end, String next) {
+        long dn = Panjika.civilDay(Sky.localMidnight(year, month, day) + 0.25);
+        if (end == 0) return name;
+        return name + " — শেষ " + Panjika.timeText(end, dn) + ", তারপর " + next;
+    }
+
     /** label + value, in the order of the page (also the order of the copied / read-aloud text) */
     List<String[]> rows() {
         List<String[]> r = new ArrayList<>();
         r.add(new String[]{"বার", weekdayName()});
         r.add(new String[]{"ইংরেজি", englishDate()});
-        r.add(new String[]{"বাংলা", SOON});
-        r.add(new String[]{"শকাব্দ", SOON});
-        r.add(new String[]{"পঞ্জিকা", methodName(method)});
-        r.add(new String[]{"তিথি", SOON});
-        r.add(new String[]{"নক্ষত্র", SOON});
+        Panjika.Result c = calc();
+        long dn = Panjika.civilDay(Sky.localMidnight(year, month, day) + 0.25);
+        r.add(new String[]{"বাংলা", BanglaText.digits(c.monthDay) + " " + Panjika.BENGALI_MONTHS[c.monthIndex] + " " + BanglaText.digits(c.bangaYear)});
+        r.add(new String[]{"শকাব্দ", BanglaText.digits(c.shakaYear)});
+        r.add(new String[]{"পঞ্জিকা", SURYA.equals(method)
+                ? "সূর্যসিদ্ধান্ত (কলকাতার সূর্যোদয়ে; ছাপা পঞ্জিকাভেদে কয়েক মিনিট থেকে ঘণ্টাখানেক পার্থক্য হতে পারে)"
+                : "দৃকসিদ্ধান্ত (আকাশের হিসাব, কলকাতা)"});
+        r.add(new String[]{"সূর্যোদয়", Panjika.timeText(c.sunrise, dn)});
+        r.add(new String[]{"সূর্যাস্ত", Panjika.timeText(c.sunset, dn)});
+        r.add(new String[]{"তিথি", withEnd(c.tithiName, c.tithiEnd, c.tithiNext)});
+        r.add(new String[]{"নক্ষত্র", withEnd(c.nakshatraName, c.nakshatraEnd, c.nakshatraNext)});
+        r.add(new String[]{"যোগ", withEnd(c.yogaName, c.yogaEnd, c.yogaNext)});
+        r.add(new String[]{"করণ", c.karanaName});
         r.add(new String[]{"উৎসব", SOON});
         r.add(new String[]{"বিশেষ ব্যক্তি", SOON});
         r.add(new String[]{"ঐতিহাসিক গুরুত্ব", SOON});

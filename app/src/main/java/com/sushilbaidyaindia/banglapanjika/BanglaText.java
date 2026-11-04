@@ -14,6 +14,17 @@ final class BanglaText {
         return digits(String.valueOf(n));
     }
 
+    /** ২০২৬ -> 2026 (so that dates typed with Bangla digits can be read) */
+    static String asciiDigits(String s) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= '০' && c <= '৯') b.append((char) ('0' + (c - '০')));
+            else b.append(c);
+        }
+        return b.toString();
+    }
+
     static String digits(String s) {
         StringBuilder b = new StringBuilder();
         for (int i = 0; i < s.length(); i++) {

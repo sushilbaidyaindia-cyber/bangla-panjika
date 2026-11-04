@@ -1,5 +1,6 @@
 package com.sushilbaidyaindia.banglapanjika;
 
+import android.app.DatePickerDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.ClipboardManager;
@@ -21,6 +22,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -67,7 +69,11 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         prefs = getSharedPreferences("panjika", MODE_PRIVATE);
-        if (b != null) tab = b.getInt("tab", 0);
+        if (b != null) {
+            tab = b.getInt("tab", 0);
+            long ms = b.getLong("day", -1);
+            if (ms > 0) shown.setTimeInMillis(ms);
+        }
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -115,6 +121,24 @@ public class MainActivity extends AppCompatActivity {
                 @Override public void onError(String id) { runOnUiThread(() -> setReading(false)); }
             });
         });
+
+        if (!prefs.contains("method")) askMethod();
+    }
+
+    /** first start only: the person picks the panjika method once; it can be changed later in the settings */
+    private void askMethod() {
+        final String[] names = {
+                "সূর্যসিদ্ধান্ত — বেণীমাধব শীল, মদন গুপ্ত ও প্রচলিত ছাপা পঞ্জিকার ধরন",
+                "দৃকসিদ্ধান্ত — আকাশের আসল অবস্থানের হিসাব"};
+        new AlertDialog.Builder(this)
+                .setTitle("কোন পদ্ধতির পঞ্জিকা দেখবেন?")
+                .setMessage("একবারই বেছে নিন। পরে সেটিংস ট্যাবে গিয়ে বদলানো যাবে।")
+                .setCancelable(false)
+                .setItems(names, (d, which) -> {
+                    prefs.edit().putString("method", which == 0 ? DayInfo.SURYA : DayInfo.DRIK).apply();
+                    recreate();
+                })
+                .show();
     }
 
     private static boolean bad(int r) {
@@ -125,6 +149,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         out.putInt("tab", tab);
+        out.putLong("day", shown.getTimeInMillis());
     }
 
     @Override
@@ -166,18 +191,27 @@ public class MainActivity extends AppCompatActivity {
         sv.addView(dayBox);
         page.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setPadding(dp(12), dp(8), dp(12), dp(8));
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.VERTICAL);
+        bottom.setPadding(dp(8), dp(4), dp(8), dp(4));
+
+        Button prev = button("আগের দিন");
+        prev.setOnClickListener(v -> moveDays(-1));
+        Button next = button("পরের দিন");
+        next.setOnClickListener(v -> moveDays(1));
+        Button todayBtn = button("আজ");
+        todayBtn.setOnClickListener(v -> goTo(Calendar.getInstance()));
+        bottom.addView(row(prev, next, todayBtn));
+
+        Button pick = button("তারিখ বাছুন");
+        pick.setOnClickListener(v -> pickDate());
         readBtn = button("পড়ে শোনাও");
         readBtn.setOnClickListener(v -> toggleRead());
         Button copy = button("কপি");
         copy.setOnClickListener(v -> copyDay());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        lp.setMargins(dp(4), 0, dp(4), 0);
-        actions.addView(readBtn, lp);
-        actions.addView(copy, lp);
-        page.addView(actions, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        bottom.addView(row(pick, readBtn, copy));
+
+        page.addView(bottom, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         return page;
     }
 
@@ -189,7 +223,7 @@ public class MainActivity extends AppCompatActivity {
         DayInfo d = currentDay();
         dayBox.removeAllViews();
 
-        TextView head = text(d.headline(), 24, true, ACCENT);
+        TextView head = text((isToday() ? "আজ — " : "") + d.headline(), 24, true, ACCENT);
         ViewCompat.setAccessibilityHeading(head, true);
         head.setPadding(0, 0, 0, dp(12));
         dayBox.addView(head);
@@ -207,6 +241,39 @@ public class MainActivity extends AppCompatActivity {
             lp.setMargins(0, 0, 0, dp(8));
             dayBox.addView(t, lp);
         }
+    }
+
+    private boolean isToday() {
+        Calendar t = Calendar.getInstance();
+        return t.get(Calendar.YEAR) == shown.get(Calendar.YEAR) && t.get(Calendar.DAY_OF_YEAR) == shown.get(Calendar.DAY_OF_YEAR);
+    }
+
+    /** show another day and let TalkBack read its heading */
+    private void goTo(Calendar c) {
+        if (tts != null && reading) { tts.stop(); setReading(false); }
+        shown.setTimeInMillis(c.getTimeInMillis());
+        renderDay();
+        select(0, true);
+    }
+
+    private void moveDays(int n) {
+        Calendar c = (Calendar) shown.clone();
+        c.add(Calendar.DAY_OF_MONTH, n);
+        if (c.get(Calendar.YEAR) < 1600 || c.get(Calendar.YEAR) > 2400) {
+            Toast.makeText(this, "এই বছরের পাতা নেই", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        goTo(c);
+    }
+
+    private void pickDate() {
+        DatePickerDialog dlg = new DatePickerDialog(this, (view, y, m, d) -> {
+            Calendar c = Calendar.getInstance();
+            c.clear();
+            c.set(y, m, d);
+            goTo(c);
+        }, shown.get(Calendar.YEAR), shown.get(Calendar.MONTH), shown.get(Calendar.DAY_OF_MONTH));
+        dlg.show();
     }
 
     private void copyDay() {
@@ -271,11 +338,19 @@ public class MainActivity extends AppCompatActivity {
         q.setMinHeight(dp(56));
         box.addView(q, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        final TextView status = text("সার্চ পরের ধাপে চালু হবে। এখন আজকের পাতা দেখতে \"আজ\" ট্যাবে যান।", 16, false, MUTED);
+        final TextView status = text("তারিখ লিখুন, যেমন: আজ, গতকাল, 17 March, 17/03/2026, ১৭ মার্চ ২০২৬। বাংলা তারিখ (১৭ কার্তিক) আর উৎসবের নাম দিয়ে সার্চ পরের ধাপগুলোতে আসবে।", 16, false, MUTED);
         status.setPadding(0, dp(12), 0, 0);
+        status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
 
         Button go = button("খুঁজুন");
-        go.setOnClickListener(v -> status.setText("সার্চ এখনো চালু হয়নি, এটা দ্বিতীয় ধাপে আসছে।"));
+        go.setOnClickListener(v -> doSearch(q, status));
+        q.setOnEditorActionListener((v, id, ev) -> {
+            if (id == EditorInfo.IME_ACTION_SEARCH) {
+                doSearch(q, status);
+                return true;
+            }
+            return false;
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(8), 0, 0);
         box.addView(go, lp);
@@ -321,7 +396,30 @@ public class MainActivity extends AppCompatActivity {
         return sv;
     }
 
+    private void doSearch(EditText q, TextView status) {
+        String text = q.getText().toString();
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(q.getWindowToken(), 0);
+        Calendar c = DateParser.parse(text, Calendar.getInstance());
+        if (c == null) {
+            status.setText("\"" + text.trim() + "\" বুঝতে পারিনি। এভাবে লিখুন: আজ, গতকাল, 17 March, 17/03/2026, ১৭ মার্চ ২০২৬।");
+            return;
+        }
+        goTo(c);
+    }
+
     // ------------------------------------------------------------------ small helpers
+
+    private LinearLayout row(View... views) {
+        LinearLayout r = new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        for (View v : views) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+            lp.setMargins(dp(3), 0, dp(3), 0);
+            r.addView(v, lp);
+        }
+        return r;
+    }
 
     private int dp(int v) {
         return Math.round(v * getResources().getDisplayMetrics().density);
@@ -346,8 +444,8 @@ public class MainActivity extends AppCompatActivity {
     private Button button(String s) {
         Button b = new Button(this);
         b.setText(s);
-        b.setTextSize(18);
-        b.setMinHeight(dp(56));
+        b.setTextSize(16);
+        b.setMinHeight(dp(52));
         b.setAllCaps(false);
         return b;
     }
