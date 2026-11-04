@@ -36,6 +36,7 @@ import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 
 import java.util.Calendar;
 import java.util.Locale;
@@ -69,6 +70,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle b) {
         super.onCreate(b);
         prefs = getSharedPreferences("panjika", MODE_PRIVATE);
+        History.load(this);
         if (b != null) {
             tab = b.getInt("tab", 0);
             long ms = b.getLong("day", -1);
@@ -218,6 +220,21 @@ public class MainActivity extends AppCompatActivity {
         return new DayInfo(shown, prefs.getString("method", DayInfo.DRIK));
     }
 
+    private void openWiki(final String url, String what) {
+        new AlertDialog.Builder(this)
+                .setTitle("উইকিপিডিয়ায় খুলবেন?")
+                .setMessage(what.length() > 140 ? what.substring(0, 140) + "…" : what)
+                .setPositiveButton("খুলুন", (dlg, w) -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)));
+                    } catch (ActivityNotFoundException e) {
+                        Toast.makeText(this, "লিংক খোলার অ্যাপ পাওয়া যায়নি", Toast.LENGTH_SHORT).show();
+                    }
+                })
+                .setNegativeButton("থাক", null)
+                .show();
+    }
+
     private void renderDay() {
         DayInfo d = currentDay();
         dayBox.removeAllViews();
@@ -228,7 +245,14 @@ public class MainActivity extends AppCompatActivity {
         dayBox.addView(head);
         pageHeads[0] = head;
 
-        for (String[] row : d.rows()) {
+        for (final String[] row : d.rows()) {
+            if (row[0].startsWith("#")) {
+                TextView sec = text(row[0].substring(1), 20, true, ACCENT);
+                ViewCompat.setAccessibilityHeading(sec, true);
+                sec.setPadding(dp(4), dp(14), 0, dp(4));
+                dayBox.addView(sec);
+                continue;
+            }
             SpannableStringBuilder sb = new SpannableStringBuilder(row[0] + ": ");
             sb.setSpan(new StyleSpan(Typeface.BOLD), 0, sb.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             sb.append(row[1]);
@@ -236,6 +260,13 @@ public class MainActivity extends AppCompatActivity {
             t.setText(sb);
             t.setPadding(dp(14), dp(12), dp(14), dp(12));
             t.setBackground(card());
+            if (row.length > 2) {                       // person / event with a Wikipedia page
+                t.setClickable(true);
+                t.setFocusable(true);
+                t.setOnClickListener(v -> openWiki(row[2], row[1]));
+                ViewCompat.replaceAccessibilityAction(t, AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_CLICK,
+                        "উইকিপিডিয়ায় খুলুন", null);
+            }
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
             lp.setMargins(0, 0, 0, dp(8));
             dayBox.addView(t, lp);

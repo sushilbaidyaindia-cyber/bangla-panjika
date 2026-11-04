@@ -72,15 +72,42 @@ final class DayInfo {
         r.add(new String[]{"যোগ", withEnd(c.yogaName, c.yogaEnd, c.yogaNext)});
         r.add(new String[]{"করণ", c.karanaName});
         r.add(new String[]{"উৎসব", SOON});
-        r.add(new String[]{"বিশেষ ব্যক্তি", SOON});
-        r.add(new String[]{"ঐতিহাসিক গুরুত্ব", SOON});
+        addHistory(r);
         return r;
+    }
+
+    /** a heading row has a label starting with "#"; an entry row is {year, text} or {year, text, wikipedia url} */
+    private void addHistory(List<String[]> r) {
+        org.json.JSONObject h = History.day(month, day);
+        if (h == null) {
+            r.add(new String[]{"ইতিহাস", "এই দিনের জন্ম-মৃত্যু-ঘটনার তথ্য এখনও অ্যাপে যোগ হয়নি"});
+            return;
+        }
+        String[][] sections = {{"s", "#বিশেষ দিন"}, {"b", "#যাঁদের জন্মদিন"}, {"d", "#যাঁদের প্রয়াণদিন"}, {"e", "#ঐতিহাসিক ঘটনা"}};
+        for (String[] sec : sections) {
+            org.json.JSONArray a = h.optJSONArray(sec[0]);
+            if (a == null || a.length() == 0) continue;
+            r.add(new String[]{sec[1], ""});
+            for (int i = 0; i < a.length(); i++) {
+                org.json.JSONObject o = a.optJSONObject(i);
+                if (o == null) continue;
+                String y = o.optString("y", "");
+                String t = o.optString("t", "");
+                String u = o.optString("u", "");
+                if (t.isEmpty()) continue;
+                r.add(u.isEmpty() ? new String[]{y.isEmpty() ? "•" : y, t} : new String[]{y.isEmpty() ? "•" : y, t, u});
+            }
+        }
+        r.add(new String[]{"উৎস", "উইকিপিডিয়া (CC BY-SA)"});
     }
 
     /** the text for the copy and read-aloud buttons */
     String toText() {
         StringBuilder b = new StringBuilder();
-        for (String[] row : rows()) b.append(row[0]).append(": ").append(row[1]).append("\n");
+        for (String[] row : rows()) {
+            if (row[0].startsWith("#")) b.append("\n").append(row[0].substring(1)).append(":\n");
+            else b.append(row[0]).append(": ").append(row[1]).append("\n");
+        }
         return b.toString().trim();
     }
 }
