@@ -131,8 +131,7 @@ public class MainActivity extends AppCompatActivity {
                 "সূর্যসিদ্ধান্ত — বেণীমাধব শীল, মদন গুপ্ত ও প্রচলিত ছাপা পঞ্জিকার ধরন",
                 "দৃকসিদ্ধান্ত — আকাশের আসল অবস্থানের হিসাব"};
         new AlertDialog.Builder(this)
-                .setTitle("কোন পদ্ধতির পঞ্জিকা দেখবেন?")
-                .setMessage("একবারই বেছে নিন। পরে সেটিংস ট্যাবে গিয়ে বদলানো যাবে।")
+                .setTitle("কোন পদ্ধতির পঞ্জিকা দেখবেন? একবারই বাছুন, পরে সেটিংস ট্যাবে বদলানো যাবে।")
                 .setCancelable(false)
                 .setItems(names, (d, which) -> {
                     prefs.edit().putString("method", which == 0 ? DayInfo.SURYA : DayInfo.DRIK).apply();
