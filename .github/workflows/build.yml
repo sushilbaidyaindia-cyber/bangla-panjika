@@ -35,25 +35,6 @@ jobs:
             git push || true
           fi
 
-      # The history data (births, deaths, events, special days) is fetched from Wikipedia once and then kept in the repo.
-      # To fetch it again, delete app/src/main/assets/history.json from the repo and run the build.
-      - name: Fetch history data (only when the file is not in the repo yet)
-        if: hashFiles('app/src/main/assets/history.json') == ''
-        continue-on-error: true
-        run: python3 -u scripts/fetch_history.py app/src/main/assets/history.json 2>&1 | tee scripts/history-fetch.log
-
-      - name: Keep the history data in the repo
-        continue-on-error: true
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          [ -f scripts/history-fetch.log ] && git add scripts/history-fetch.log
-          [ -f app/src/main/assets/history.json ] && git add app/src/main/assets/history.json
-          git commit -m "History data and fetch log" || true
-          git pull --rebase -q || true
-          git push || true
-          ls -la app/src/main/assets 2>/dev/null || echo "no assets folder (history data missing)"
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
