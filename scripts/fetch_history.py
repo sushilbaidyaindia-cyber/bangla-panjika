@@ -201,30 +201,65 @@ def fetch_en(mm, dd):
     return parse_en_feed(json.loads(http_get(url)))
 
 
+def diag(mm, dd):
+    """print what the Bangla page looks like, so a wrong guess about its layout can be fixed from the log"""
+    title = "%s %s" % (bn_num(dd), MONTHS[mm - 1])
+    url = ("https://bn.wikipedia.org/w/api.php?action=parse&format=json&formatversion=2&redirects=1&prop=wikitext&page="
+           + urllib.parse.quote(title))
+    try:
+        raw = http_get(url)
+        data = json.loads(raw)
+        wt = (data.get("parse") or {}).get("wikitext") or ""
+        print("DIAG %s: title=%r wikitext=%d chars, keys=%s" % ("%02d-%02d" % (mm, dd), title, len(wt), list(data.keys())))
+        if not wt:
+            print("DIAG raw start:", raw[:400])
+        print("DIAG headings:", [l.strip() for l in wt.splitlines() if l.startswith("=")][:40])
+        r = parse_wikitext(wt)
+        print("DIAG parsed counts:", {k: len(v) for k, v in r.items()})
+        print("DIAG wikitext start:", wt[:700].replace("\n", " | "))
+        bullets = [l for l in wt.splitlines() if l.startswith("*")][:6]
+        print("DIAG first bullets:", bullets)
+    except Exception as e:
+        print("DIAG failed %02d-%02d: %s" % (mm, dd, e))
+
+
+def one_day(mm, dd):
+    bn_items = {"b": [], "d": [], "e": [], "s": []}
+    en_items = {"b": [], "d": [], "e": [], "s": []}
+    msgs = []
+    try:
+        bn_items = fetch_bn(mm, dd)
+    except Exception as e:
+        msgs.append("bn fail %02d-%02d: %s" % (mm, dd, e))
+    if any(len(bn_items[k]) < MIN_BN[k] for k in "bdes"):
+        try:
+            en_items = fetch_en(mm, dd)
+        except Exception as e:
+            msgs.append("en fail %02d-%02d: %s" % (mm, dd, e))
+    time.sleep(0.1)
+    return mm, dd, build_day(mm, dd, bn_items, en_items), len(bn_items["b"]) + len(bn_items["d"]) + len(bn_items["e"]), msgs
+
+
 def main(outpath):
-    result, thin = {}, []
-    for mm in range(1, 13):
-        for dd in range(1, DAYS[mm - 1] + 1):
-            bn_items = {"b": [], "d": [], "e": [], "s": []}
-            en_items = {"b": [], "d": [], "e": [], "s": []}
-            try:
-                bn_items = fetch_bn(mm, dd)
-            except Exception as e:
-                print("bn fail %02d-%02d: %s" % (mm, dd, e))
-            if any(len(bn_items[k]) < MIN_BN[k] for k in "bdes"):
-                try:
-                    en_items = fetch_en(mm, dd)
-                except Exception as e:
-                    print("en fail %02d-%02d: %s" % (mm, dd, e))
-                time.sleep(0.15)
-            day = build_day(mm, dd, bn_items, en_items)
+    from concurrent.futures import ThreadPoolExecutor
+    print("start", time.strftime("%H:%M:%S"))
+    for (m, d) in ((1, 1), (11, 4)):
+        diag(m, d)
+    jobs = [(mm, dd) for mm in range(1, 13) for dd in range(1, DAYS[mm - 1] + 1)]
+    result, thin, bn_total = {}, [], 0
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        for mm, dd, day, nbn, msgs in ex.map(lambda a: one_day(*a), jobs):
+            for m in msgs[:1]:
+                print(m)
+            bn_total += nbn
             if any(len(day[k]) == 0 for k in "bde"):
                 thin.append("%02d-%02d" % (mm, dd))
             result["%02d-%02d" % (mm, dd)] = day
-            time.sleep(0.15)
     total = {k: sum(len(v[k]) for v in result.values()) for k in "bdes"}
-    print("totals:", total, "days with an empty b/d/e list:", len(thin), thin[:20])
-    if sum(total[k] for k in "bde") < 366 * 6:                   # almost nothing came through: do not overwrite
+    print("items from the Bangla pages (b+d+e):", bn_total)
+    print("totals chosen:", total, "days with an empty b/d/e list:", len(thin), thin[:20])
+    print("end", time.strftime("%H:%M:%S"))
+    if sum(total[k] for k in "bde") < 800:                       # almost nothing came through: do not write a useless file
         print("too little data fetched - not writing the file")
         return 1
     os.makedirs(os.path.dirname(os.path.abspath(outpath)), exist_ok=True)
