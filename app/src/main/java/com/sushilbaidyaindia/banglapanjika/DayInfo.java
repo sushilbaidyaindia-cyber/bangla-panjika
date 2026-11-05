@@ -71,7 +71,10 @@ final class DayInfo {
         r.add(new String[]{"নক্ষত্র", withEnd(c.nakshatraName, c.nakshatraEnd, c.nakshatraNext)});
         r.add(new String[]{"যোগ", withEnd(c.yogaName, c.yogaEnd, c.yogaNext)});
         r.add(new String[]{"করণ", c.karanaName});
-        r.add(new String[]{"উৎসব", SOON});
+        r.add(new String[]{"#উৎসব ও পূজা", ""});
+        java.util.List<String> fest = Festivals.forDay(year, month, day, method, c);
+        if (fest.isEmpty()) r.add(new String[]{"•", "এই দিনে তালিকাভুক্ত কোনো বড় পূজা-পার্বণ নেই"});
+        else for (String f : fest) r.add(new String[]{"•", f});
         addHistory(r);
         return r;
     }
@@ -92,9 +95,10 @@ final class DayInfo {
                 org.json.JSONObject o = a.optJSONObject(i);
                 if (o == null) continue;
                 String y = o.optString("y", "");
-                String t = o.optString("t", "");
+                String t = o.optString("t", "").replaceAll("\\s+", " ").trim();
                 String u = o.optString("u", "");
                 if (t.isEmpty()) continue;
+                if ("s".equals(sec[0]) && t.matches(".*[A-Za-z]{4,}.*")) continue;   // English-only observances read badly in Bangla
                 r.add(u.isEmpty() ? new String[]{y.isEmpty() ? "•" : y, t} : new String[]{y.isEmpty() ? "•" : y, t, u});
             }
         }

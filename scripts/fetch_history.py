@@ -13,7 +13,7 @@ import json, re, sys, time, urllib.error, urllib.parse, urllib.request, os, rand
 UA = "BanglaPanjikaBuild/1.0 (https://github.com/sushilbaidyaindia-cyber/bangla-panjika; personal offline almanac app)"
 MONTHS = ["জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"]
 DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-LIMIT = {"b": 8, "d": 8, "e": 8, "s": 6}
+LIMIT = {"b": 5, "d": 5, "e": 8, "s": 6}
 MIN_BN = {"b": 4, "d": 4, "e": 4, "s": 1}
 BN_DIG = "০১২৩৪৫৬৭৮৯"
 BENGAL_WORDS = ["বাংলা", "বাঙালি", "বাঙ্গালি", "কলকাতা", "কলিকাতা", "ঢাকা", "ভারত", "পশ্চিমবঙ্গ", "বঙ্গ", "বাংলাদেশ", "চট্টগ্রাম", "সাহিত্যিক", "কবি", "বিজ্ঞানী"]
@@ -78,6 +78,19 @@ def clean(s):
     return s.strip()
 
 
+def all_links(s, limit=4):
+    out = []
+    for m in re.finditer(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]", s):
+        t = m.group(1).strip()
+        if re.match(r"^(ফাইল|File|চিত্র|Image|বিষয়শ্রেণী|Category|[\d০-৯])", t, re.I) or ":" in t:
+            continue
+        if t not in out:
+            out.append(t)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def first_link(s):
     for m in re.finditer(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]", s):
         t = m.group(1).strip()
@@ -136,7 +149,7 @@ def parse_wikitext(text):
         link = first_link(rest)
         n = en_num(year_txt) * (-1 if bc else 1)
         y = (bn_num(en_num(year_txt)) + (" খ্রিস্টপূর্বাব্দ" if bc else ""))
-        out[cur].append({"y": y, "n": n, "t": t, "u": wiki_url(link) if link else None})
+        out[cur].append({"y": y, "n": n, "t": t, "u": wiki_url(link) if link else None, "ls": all_links(rest)})
     return out
 
 
@@ -193,10 +206,11 @@ def build_day(mm, dd, bn_items, en_items):
     day = {}
     for k in "bdes":
         items = list(bn_items.get(k, []))
-        if len(items) < MIN_BN[k]:
+        if len(items) < MIN_BN[k] and k != "s":          # English special days read badly: leave that part empty
             items += [dict(i, en=True) for i in en_items.get(k, [])]
         picked = pick(items, LIMIT[k], mm * 100 + dd)
-        day[k] = [{"y": i["y"], "t": i["t"], **({"u": i["u"]} if i.get("u") else {})} for i in picked]
+        day[k] = [{"y": i["y"], "t": i["t"], **({"u": i["u"]} if i.get("u") else {}), **({"ls": i["ls"]} if i.get("ls") else {})}
+                  for i in picked]
     return day
 
 
@@ -212,6 +226,142 @@ def fetch_bn(mm, dd):
 def fetch_en(mm, dd):
     url = "https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/all/%02d/%02d" % (mm, dd)
     return parse_en_feed(json.loads(http_get(url)))
+
+
+# ------------------------------------------------------------------ person details (Bangla Wikipedia intro text)
+DATE_PAREN = re.compile(r"\(([^()]*)\)")
+VERB_START = ("ছিলেন", "হলেন", "ছিল", "হন ", "একজন", "একটি")
+
+
+def month_in(text):
+    return any(m in text for m in MONTHS)
+
+
+def split_lifespan(extract):
+    """-> (name_before_paren, born_text, died_text, rest_after_paren) or None if this does not look like a person"""
+    head = extract[:300]
+    for m in DATE_PAREN.finditer(head):
+        inner = m.group(1)
+        if not re.search(r"[০-৯0-9]{3,4}", inner):
+            continue
+        parts = re.split(r"\s*[–—]\s*|\s+-\s+", inner)
+        born = died = ""
+        if len(parts) >= 2:
+            born, died = parts[0].strip(), parts[1].strip()
+        elif re.search(r"জন্ম|জ\.", inner):
+            born = re.sub(r"^(জন্ম|জ\.)\s*[:ঃ]?\s*", "", inner.strip())
+        else:
+            continue
+        born = re.sub(r"^(জন্ম|জ\.)\s*[:ঃ]?\s*", "", born).strip()
+        died = re.sub(r"^(মৃত্যু|মৃ\.)\s*[:ঃ]?\s*", "", died).strip()
+        name = head[:m.start()].strip()
+        rest = extract[m.end():].strip()
+        return name, born, died, rest
+    return None
+
+
+def sentences_of(text):
+    return [x.strip() for x in re.split(r"(?<=।)\s*", text) if x.strip()]
+
+
+def life_phrase(txt, verb):
+    txt = txt.strip()
+    if not txt or txt in ("?", "অজানা"):
+        return ""
+    if month_in(txt):
+        return "তিনি %s তারিখে %s।" % (txt, verb)
+    if re.fullmatch(r"[০-৯0-9]{3,4}( খ্রিস্টপূর্বাব্দ| খ্রিষ্টপূর্ব)?", txt):
+        return "তিনি %s সালে %s।" % (txt, verb)
+    return ""
+
+
+def compose(kind, y, mm, dd, title, extract):
+    info = split_lifespan(extract)
+    if not info:
+        return None
+    name, born, died, rest = info
+    name = re.sub(r"\s+", " ", name).strip(" ,।")
+    if not name or len(name) > 60:
+        name = re.sub(r"\s*\(.*?\)\s*$", "", title)
+    day_txt = "%s %s" % (bn_num(dd), MONTHS[mm - 1])
+    when = ("%s %s" % (y, day_txt)) if "পূর্ব" in y else ("%s সালের %s" % (y, day_txt))
+    verb = "জন্মগ্রহণ করেন" if kind == "b" else "মৃত্যুবরণ করেন"
+    out = ["%s %s %s।" % (name, when, verb)]
+    sents = sentences_of(rest)
+    if sents:
+        first = sents[0]
+        out.append(("তিনি " + first) if first.startswith(VERB_START) else first)
+        total = len(out[-1])
+        for sx in sents[1:3]:
+            if total + len(sx) > 420:
+                break
+            out.append(sx)
+            total += len(sx)
+    other = life_phrase(died, "মৃত্যুবরণ করেন") if kind == "b" else life_phrase(born, "জন্মগ্রহণ করেন")
+    if other:
+        out.append(other)
+    return " ".join(out)
+
+
+def fetch_extracts(titles):
+    """titles -> {title: extract}; batches of 20, following normalisation and redirects"""
+    got = {}
+    titles = list(titles)
+    for i in range(0, len(titles), 20):
+        chunk = titles[i:i + 20]
+        url = ("https://bn.wikipedia.org/w/api.php?action=query&format=json&formatversion=2&prop=extracts&exintro=1&explaintext=1"
+               "&exlimit=20&redirects=1&titles=" + urllib.parse.quote("|".join(chunk)))
+        try:
+            data = json.loads(http_get(url)).get("query", {})
+        except Exception as e:
+            print("extract batch fail:", e)
+            continue
+        alias = {}
+        for key in ("normalized", "redirects"):
+            for r in data.get(key, []) or []:
+                alias[r["from"]] = r["to"]
+        by_title = {pg.get("title"): (pg.get("extract") or "") for pg in data.get("pages", []) or []}
+        for t in chunk:
+            cur, hops = t, 0
+            while cur in alias and hops < 4:
+                cur, hops = alias[cur], hops + 1
+            if by_title.get(cur):
+                got[t] = by_title[cur]
+        time.sleep(0.8)
+    return got
+
+
+def enrich(result):
+    wanted, seen = [], set()
+    for key, day in result.items():
+        for k in "bd":
+            for it in day[k]:
+                for t in it.get("ls", []):
+                    if t not in seen:
+                        seen.add(t)
+                        wanted.append(t)
+    print("person pages to look up:", len(wanted))
+    ext = fetch_extracts(wanted)
+    done = fail = 0
+    for key, day in result.items():
+        mm, dd = int(key[:2]), int(key[3:])
+        for k in "bd":
+            for it in day[k]:
+                text = None
+                for t in it.get("ls", []):
+                    if t in ext:
+                        text = compose(k, it["y"], mm, dd, t, ext[t])
+                        if text:
+                            it["t"] = text
+                            it["u"] = wiki_url(t)
+                            break
+                done += 1 if text else 0
+                fail += 0 if text else 1
+    print("person entries with details: %d, without: %d" % (done, fail))
+    for day in result.values():
+        for k in "bdes":
+            for it in day[k]:
+                it.pop("ls", None)
 
 
 def diag(mm, dd):
@@ -254,7 +404,7 @@ def one_day(mm, dd):
 
 def main(outpath):
     print("start", time.strftime("%H:%M:%S"))
-    DEADLINE[0] = time.time() + 22 * 60              # at most 22 minutes in all
+    DEADLINE[0] = time.time() + 45 * 60              # at most 45 minutes in all
     for (m, d) in ((1, 1), (11, 4)):
         diag(m, d)
         time.sleep(1.0)
@@ -272,6 +422,14 @@ def main(outpath):
             result["%02d-%02d" % (mm, dd)] = day
             time.sleep(0.8)                          # one request at a time, politely
         print("month", mm, "done", time.strftime("%H:%M:%S"))
+    try:
+        enrich(result)
+    except Exception as e:
+        print("enrich failed:", e)
+        for day in result.values():
+            for k in "bdes":
+                for it in day[k]:
+                    it.pop("ls", None)
     total = {k: sum(len(v[k]) for v in result.values()) for k in "bdes"}
     print("pages that failed:", fails)
     print("items from the Bangla pages (b+d+e):", bn_total)

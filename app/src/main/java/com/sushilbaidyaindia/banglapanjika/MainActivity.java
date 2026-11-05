@@ -1,5 +1,6 @@
 package com.sushilbaidyaindia.banglapanjika;
 
+import java.util.List;
 import android.app.DatePickerDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
@@ -361,22 +362,24 @@ public class MainActivity extends AppCompatActivity {
         pageHeads[1] = head;
 
         final EditText q = new EditText(this);
-        q.setHint("যেমন: আজ, 17 March, ১৭ কার্তিক, দুর্গা");
+        q.setHint("যেমন: আজ, 17 March, ১৭ কার্তিক ১৪৩৩, দুর্গাপূজা, কালীপূজা ২০২৭");
         q.setTextSize(18);
         q.setInputType(InputType.TYPE_CLASS_TEXT);
         q.setImeOptions(EditorInfo.IME_ACTION_SEARCH);
         q.setMinHeight(dp(56));
         box.addView(q, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        final TextView status = text("তারিখ লিখুন, যেমন: আজ, গতকাল, 17 March, 17/03/2026, ১৭ মার্চ ২০২৬। বাংলা তারিখ (১৭ কার্তিক) আর উৎসবের নাম দিয়ে সার্চ পরের ধাপগুলোতে আসবে।", 16, false, MUTED);
+        final TextView status = text("ইংরেজি তারিখ (17 March, ১৭/০৩/২০২৬), বাংলা তারিখ (১৭ কার্তিক, ১৭ কার্তিক ১৪৩৩) বা পুজোর নাম (দুর্গা, কালীপূজা, রথযাত্রা) লিখুন। পুজোর নামের সঙ্গে বছর লিখলে সেই বছরে খুঁজবে, না লিখলে এই বছরে।", 16, false, MUTED);
+        final LinearLayout results = new LinearLayout(this);
+        results.setOrientation(LinearLayout.VERTICAL);
         status.setPadding(0, dp(12), 0, 0);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
 
         Button go = button("খুঁজুন");
-        go.setOnClickListener(v -> doSearch(q, status));
+        go.setOnClickListener(v -> doSearch(q, status, results));
         q.setOnEditorActionListener((v, id, ev) -> {
             if (id == EditorInfo.IME_ACTION_SEARCH) {
-                doSearch(q, status);
+                doSearch(q, status, results);
                 return true;
             }
             return false;
@@ -385,6 +388,7 @@ public class MainActivity extends AppCompatActivity {
         lp.setMargins(0, dp(8), 0, 0);
         box.addView(go, lp);
         box.addView(status);
+        box.addView(results);
         return sv;
     }
 
@@ -426,16 +430,76 @@ public class MainActivity extends AppCompatActivity {
         return sv;
     }
 
-    private void doSearch(EditText q, TextView status) {
-        String text = q.getText().toString();
+    private void doSearch(EditText q, final TextView status, final LinearLayout results) {
+        final String text = q.getText().toString();
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) imm.hideSoftInputFromWindow(q.getWindowToken(), 0);
+        results.removeAllViews();
         Calendar c = DateParser.parse(text, Calendar.getInstance());
-        if (c == null) {
-            status.setText("\"" + text.trim() + "\" বুঝতে পারিনি। এভাবে লিখুন: আজ, গতকাল, 17 March, 17/03/2026, ১৭ মার্চ ২০২৬।");
+        if (c != null) {
+            goTo(c);
             return;
         }
-        goTo(c);
+        final String method = prefs.getString("method", DayInfo.DRIK);
+        status.setText("খুঁজছি…");
+        new Thread(() -> {
+            Calendar now = Calendar.getInstance();
+            List<Finder.Hit> hits = null;
+            String note = "";
+            try {
+                Panjika.Result t = Panjika.compute(now.get(Calendar.YEAR), now.get(Calendar.MONTH) + 1, now.get(Calendar.DAY_OF_MONTH), method);
+                hits = Finder.byBanglaDate(text, method, t.bangaYear);
+                if (hits == null) {
+                    int year = now.get(Calendar.YEAR);
+                    String name = text;
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d{4})").matcher(BanglaText.asciiDigits(text));
+                    if (m.find()) {
+                        year = Integer.parseInt(m.group(1));
+                        name = BanglaText.asciiDigits(text).replace(m.group(1), " ");
+                    }
+                    if (year < 1900 || year > 2100) {
+                        note = "বছর ১৯০০ থেকে ২১০০-র মধ্যে লিখুন।";
+                    } else {
+                        hits = Finder.byFestival(name, method, year);
+                        note = BanglaText.digits(year) + " সালে ";
+                    }
+                }
+            } catch (RuntimeException e) {
+                hits = null;
+                note = "খুঁজতে গিয়ে সমস্যা হয়েছে।";
+            }
+            final List<Finder.Hit> fh = hits;
+            final String fn = note;
+            runOnUiThread(() -> showHits(text, fh, fn, status, results));
+        }).start();
+    }
+
+    private void showHits(String text, List<Finder.Hit> hits, String note, TextView status, LinearLayout results) {
+        results.removeAllViews();
+        if (hits == null || hits.isEmpty()) {
+            if (hits == null && note.isEmpty()) status.setText("\"" + text.trim() + "\" বুঝতে পারিনি। লিখুন: আজ, 17 March, ১৭ কার্তিক ১৪৩৩, বা পুজোর নাম, যেমন দুর্গাপূজা।");
+            else if (hits == null) status.setText(note);
+            else status.setText(note + "\"" + text.trim() + "\" নামে কোনো উৎসব পাইনি। অন্য নামে বা বছর দিয়ে চেষ্টা করুন।");
+            return;
+        }
+        if (hits.size() == 1 && hits.get(0).label.isEmpty()) {
+            goTo(hits.get(0).cal);
+            return;
+        }
+        status.setText(note + BanglaText.digits(hits.size()) + "টি ফল পাওয়া গেছে। ছুঁলে সেই দিনের পাতা খুলবে।");
+        for (Finder.Hit h : hits) {
+            Calendar hc = h.cal;
+            Panjika.Result r = Panjika.compute(hc.get(Calendar.YEAR), hc.get(Calendar.MONTH) + 1, hc.get(Calendar.DAY_OF_MONTH), prefs.getString("method", DayInfo.DRIK));
+            DayInfo di = new DayInfo(hc, prefs.getString("method", DayInfo.DRIK));
+            String line = di.headline() + " (" + BanglaText.digits(r.monthDay) + " " + Panjika.BENGALI_MONTHS[r.monthIndex] + " " + BanglaText.digits(r.bangaYear) + ")\n" + h.label;
+            Button b = button(line);
+            b.setAllCaps(false);
+            b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+            b.setOnClickListener(v -> goTo(hc));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, dp(8), 0, 0);
+            results.addView(b, lp);
+        }
     }
 
     // ------------------------------------------------------------------ small helpers
