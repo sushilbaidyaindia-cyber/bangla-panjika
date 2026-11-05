@@ -8,9 +8,9 @@ Text is from Wikipedia (CC BY-SA); the app shows "উৎস: উইকিপি�
 
 usage: fetch_history.py OUTPUT.json        |   fetch_history.py --selftest
 """
-import json, re, sys, time, urllib.parse, urllib.request, os, random
+import json, re, sys, time, urllib.error, urllib.parse, urllib.request, os, random
 
-UA = "BanglaPanjikaBuild/1.0 (personal offline almanac app; contact via GitHub repo bangla-panjika)"
+UA = "BanglaPanjikaBuild/1.0 (https://github.com/sushilbaidyaindia-cyber/bangla-panjika; personal offline almanac app)"
 MONTHS = ["জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"]
 DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 LIMIT = {"b": 8, "d": 8, "e": 8, "s": 6}
@@ -27,16 +27,29 @@ def en_num(s):
     return int("".join(str(BN_DIG.index(c)) if c in BN_DIG else c for c in s if c in BN_DIG or c.isdigit()) or 0)
 
 
-def http_get(url, tries=4):
+DEADLINE = [0.0]          # set in main(): no new requests after this moment
+
+
+def http_get(url, tries=6):
     last = None
     for i in range(tries):
+        if DEADLINE[0] and time.time() > DEADLINE[0]:
+            raise RuntimeError("time budget used up")
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with urllib.request.urlopen(req, timeout=25) as r:
                 return r.read().decode("utf-8")
-        except Exception as e:                       # network hiccup / rate limit: wait and retry
+        except urllib.error.HTTPError as e:           # 429 = too many requests: wait as long as asked, then try again
             last = e
-            time.sleep(1.5 * (i + 1))
+            wait = 0
+            try:
+                wait = int(e.headers.get("Retry-After") or 0)
+            except Exception:
+                wait = 0
+            time.sleep(min(60, wait if wait > 0 else 4 * (2 ** i)))
+        except Exception as e:
+            last = e
+            time.sleep(2 * (i + 1))
     raise last
 
 
@@ -88,7 +101,7 @@ def classify(h2):
     return None
 
 
-YEAR_RE = re.compile(r"^(?:\[\[)?\s*([০-৯0-9]+)(?:\s*(খ্রিস্টপূর্বাব্দ|খ্রিস্টপূর্ব|খ্রি\.পূ\.|খ্রিষ্টপূর্বাব্দ))?[^\]\-–—:]*?(?:\]\])?\s*[–—\-:]\s*(.+)$")
+YEAR_RE = re.compile(r"^(?:\[\[)?\s*([০-৯0-9]+)(?:\s*(খ্রিস্টপূর্ব\S*|খ্রিষ্টপূর্ব\S*|খ্রি\.পূ\.))?[^\]\-–—:]*?(?:\]\])?\s*[–—\-:]\s*(.+)$")
 
 
 def parse_wikitext(text):
@@ -236,30 +249,35 @@ def one_day(mm, dd):
             en_items = fetch_en(mm, dd)
         except Exception as e:
             msgs.append("en fail %02d-%02d: %s" % (mm, dd, e))
-    time.sleep(0.1)
     return mm, dd, build_day(mm, dd, bn_items, en_items), len(bn_items["b"]) + len(bn_items["d"]) + len(bn_items["e"]), msgs
 
 
 def main(outpath):
-    from concurrent.futures import ThreadPoolExecutor
     print("start", time.strftime("%H:%M:%S"))
+    DEADLINE[0] = time.time() + 22 * 60              # at most 22 minutes in all
     for (m, d) in ((1, 1), (11, 4)):
         diag(m, d)
-    jobs = [(mm, dd) for mm in range(1, 13) for dd in range(1, DAYS[mm - 1] + 1)]
-    result, thin, bn_total = {}, [], 0
-    with ThreadPoolExecutor(max_workers=5) as ex:
-        for mm, dd, day, nbn, msgs in ex.map(lambda a: one_day(*a), jobs):
-            for m in msgs[:1]:
-                print(m)
+        time.sleep(1.0)
+    result, thin, bn_total, fails = {}, [], 0, 0
+    for mm in range(1, 13):
+        for dd in range(1, DAYS[mm - 1] + 1):
+            mm_, dd_, day, nbn, msgs = one_day(mm, dd)
+            if msgs:
+                fails += 1
+                if fails <= 15:
+                    print(msgs[0])
             bn_total += nbn
             if any(len(day[k]) == 0 for k in "bde"):
                 thin.append("%02d-%02d" % (mm, dd))
             result["%02d-%02d" % (mm, dd)] = day
+            time.sleep(0.8)                          # one request at a time, politely
+        print("month", mm, "done", time.strftime("%H:%M:%S"))
     total = {k: sum(len(v[k]) for v in result.values()) for k in "bdes"}
+    print("pages that failed:", fails)
     print("items from the Bangla pages (b+d+e):", bn_total)
     print("totals chosen:", total, "days with an empty b/d/e list:", len(thin), thin[:20])
     print("end", time.strftime("%H:%M:%S"))
-    if sum(total[k] for k in "bde") < 800:                       # almost nothing came through: do not write a useless file
+    if sum(total[k] for k in "bde") < 800:
         print("too little data fetched - not writing the file")
         return 1
     os.makedirs(os.path.dirname(os.path.abspath(outpath)), exist_ok=True)
@@ -294,6 +312,8 @@ def selftest():
     day = build_day(1, 2, r, en)
     assert len(day["b"]) == 3 and day["e"][0]["y"], day
     json.dumps(day, ensure_ascii=False)
+    bc = parse_wikitext("== ঘটনাবলি ==\n* ১৫৩ খ্রিষ্টপূর্ব – প্রথমবারের মতো রোমান কনসালগণ দায়িত্ব শুরু করেন।\n* ৪৫ খ্রিস্টপূর্বাব্দ – [[জুলিয়ান বর্ষপঞ্জী]]র সূচনা হয়।\n")
+    assert bc["e"][0]["n"] == -153 and "পূর্ব" in bc["e"][0]["y"] and bc["e"][1]["n"] == -45, bc
     print("selftest ok")
     return 0
 
