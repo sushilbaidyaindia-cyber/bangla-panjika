@@ -25,6 +25,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -61,6 +62,8 @@ public class MainActivity extends AppCompatActivity {
     private int tab = 0;
 
     private LinearLayout dayBox;
+    private LinearLayout reminderList;
+    private Button timeBtn;
     private Button readBtn;
 
     private TextToSpeech tts;
@@ -72,6 +75,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(b);
         prefs = getSharedPreferences("panjika", MODE_PRIVATE);
         History.load(this);
+        Reminders.schedule(this);
         if (b != null) {
             tab = b.getInt("tab", 0);
             long ms = b.getLong("day", -1);
@@ -384,9 +388,19 @@ public class MainActivity extends AppCompatActivity {
             }
             return false;
         });
+        Button clear = button("সাফ করুন");
+        clear.setContentDescription("সার্চ সাফ করুন");
+        final String hint = status.getText().toString();
+        clear.setOnClickListener(v -> {
+            q.setText("");
+            results.removeAllViews();
+            status.setText(hint);
+            q.requestFocus();
+            q.announceForAccessibility("সার্চ সাফ হয়েছে");
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         lp.setMargins(0, dp(8), 0, 0);
-        box.addView(go, lp);
+        box.addView(row(go, clear), lp);
         box.addView(status);
         box.addView(results);
         return sv;
@@ -422,12 +436,145 @@ public class MainActivity extends AppCompatActivity {
         });
         box.addView(rg);
 
+        box.addView(heading("প্রতিদিনের স্মারক"));
+        final CheckBox daily = new CheckBox(this);
+        daily.setText("প্রতিদিন সকালে আজকের বাংলা তারিখ, তিথি আর উৎসব জানাও");
+        daily.setTextSize(18);
+        daily.setMinHeight(dp(56));
+        daily.setChecked(Reminders.dailyOn(this));
+        daily.setOnCheckedChangeListener((v, on) -> {
+            if (on) askNotificationPermission();
+            Reminders.setDailyOn(this, on);
+        });
+        box.addView(daily);
+
+        timeBtn = button("");
+        refreshTimeButton();
+        timeBtn.setOnClickListener(v -> new android.app.TimePickerDialog(this, (tp, h, m) -> {
+            Reminders.setTime(this, h, m);
+            refreshTimeButton();
+        }, Reminders.hour(this), Reminders.minute(this), false).show());
+        box.addView(timeBtn);
+
+        Button test = button("এখনই একটি পরীক্ষামূলক বিজ্ঞপ্তি দেখুন");
+        test.setOnClickListener(v -> {
+            askNotificationPermission();
+            Reminders.show(this, true);
+        });
+        box.addView(test);
+
+        box.addView(heading("নিজের স্মারক (বাংলা তারিখে)"));
+        box.addView(text("একটি বাংলা তারিখ আর লেখা দিয়ে রাখুন। প্রতি বছর সেই বাংলা তারিখে, উপরের সময়ে, বিজ্ঞপ্তি আসবে।", 16, false, MUTED));
+        reminderList = new LinearLayout(this);
+        reminderList.setOrientation(LinearLayout.VERTICAL);
+        box.addView(reminderList);
+        refreshReminders();
+        Button addBtn = button("নতুন স্মারক যোগ করুন");
+        addBtn.setOnClickListener(v -> addReminderDialog());
+        box.addView(addBtn);
+        box.addView(text("বিজ্ঞপ্তি না এলে ফোনের সেটিংসে এই অ্যাপের বিজ্ঞপ্তি আর ব্যাটারির সীমা (ব্যাকগ্রাউন্ডে চলতে দেওয়া) চালু আছে কি না দেখুন।", 15, false, MUTED));
+
         box.addView(heading("উৎসবের তালিকা"));
-        box.addView(text("বছরের প্রধান উৎসব আর পূজার তালিকা পরের ধাপগুলোতে আসবে।", 17, false, INK));
+        box.addView(text("প্রতিটি দিনের পাতায় সেদিনের উৎসব আর পূজা দেখা যায়। সার্চ ট্যাবে পুজোর নাম লিখে খুঁজলে তারিখগুলো পাবেন।", 17, false, INK));
 
         box.addView(heading("অ্যাপ সম্পর্কে"));
-        box.addView(text("বাংলা পঞ্জিকা, সংস্করণ ০.১ (প্রথম ধাপ)। তারিখ, তিথি আর উৎসব ইন্টারনেট ছাড়াই চলবে। উইকিপিডিয়ার লিংক শুধু অনলাইনে খুলবে।", 17, false, INK));
+        box.addView(text("বাংলা পঞ্জিকা, সংস্করণ ০.২। তারিখ, তিথি আর উৎসব ইন্টারনেট ছাড়াই চলবে। উইকিপিডিয়ার লিংক শুধু অনলাইনে খুলবে।", 17, false, INK));
         return sv;
+    }
+
+
+    // ------------------------------------------------------------------ reminders
+    private void refreshTimeButton() {
+        String t = Reminders.timeText(Reminders.hour(this), Reminders.minute(this));
+        timeBtn.setText("সময়: " + t + " (বদলাতে ছুঁন)");
+        timeBtn.setContentDescription("স্মারকের সময় " + t + ", বদলাতে দুবার ছুঁন");
+    }
+
+    private void askNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
+        super.onRequestPermissionsResult(code, perms, res);
+        if (code == 77 && res.length > 0 && res[0] != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "বিজ্ঞপ্তির অনুমতি না দিলে স্মারক আসবে না। ফোনের সেটিংস থেকে এই অ্যাপের বিজ্ঞপ্তি চালু করুন।", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void refreshReminders() {
+        reminderList.removeAllViews();
+        List<Reminders.Item> items = Reminders.load(this);
+        if (items.isEmpty()) {
+            reminderList.addView(text("এখনও কোনো স্মারক নেই।", 17, false, INK));
+            return;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            final int idx = i;
+            Reminders.Item it = items.get(i);
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(dp(12), dp(10), dp(12), dp(10));
+            row.setBackground(card());
+            TextView t = text(Reminders.dateText(it) + " — " + it.text, 18, false, INK);
+            row.addView(t);
+            Button del = button("মুছুন");
+            del.setContentDescription(Reminders.dateText(it) + " এর স্মারক মুছুন");
+            del.setOnClickListener(v -> {
+                Reminders.remove(this, idx);
+                refreshReminders();
+                Toast.makeText(this, "স্মারক মুছে গেছে", Toast.LENGTH_SHORT).show();
+            });
+            row.addView(del);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lp.setMargins(0, dp(8), 0, 0);
+            reminderList.addView(row, lp);
+        }
+    }
+
+    private void addReminderDialog() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(20), dp(8), dp(20), 0);
+        final android.widget.Spinner month = new android.widget.Spinner(this);
+        month.setAdapter(new android.widget.ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, Panjika.BENGALI_MONTHS));
+        month.setContentDescription("বাংলা মাস");
+        box.addView(month);
+        final EditText day = new EditText(this);
+        day.setHint("বাংলা তারিখ, ১ থেকে ৩২");
+        day.setInputType(InputType.TYPE_CLASS_NUMBER);
+        day.setTextSize(18);
+        box.addView(day);
+        final EditText note = new EditText(this);
+        note.setHint("কী মনে করিয়ে দেব? যেমন: মায়ের জন্মতিথি");
+        note.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        note.setTextSize(18);
+        box.addView(note);
+        AlertDialog.Builder b = new AlertDialog.Builder(this);
+        b.setTitle("নতুন স্মারক");
+        b.setView(box);
+        b.setPositiveButton("সংরক্ষণ", (d, w) -> {
+            int dd;
+            try {
+                dd = Integer.parseInt(BanglaText.asciiDigits(day.getText().toString().trim()));
+            } catch (NumberFormatException e) {
+                dd = 0;
+            }
+            String txt = note.getText().toString().trim();
+            if (dd < 1 || dd > 32 || txt.isEmpty()) {
+                Toast.makeText(this, "তারিখ (১–৩২) আর লেখা দুটোই দিন", Toast.LENGTH_LONG).show();
+                return;
+            }
+            Reminders.add(this, month.getSelectedItemPosition(), dd, txt);
+            askNotificationPermission();
+            refreshReminders();
+            Toast.makeText(this, "স্মারক সংরক্ষিত হয়েছে", Toast.LENGTH_SHORT).show();
+        });
+        b.setNegativeButton("বাতিল", null);
+        b.show();
     }
 
     private void doSearch(EditText q, final TextView status, final LinearLayout results) {

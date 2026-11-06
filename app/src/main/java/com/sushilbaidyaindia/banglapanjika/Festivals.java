@@ -1,6 +1,8 @@
 package com.sushilbaidyaindia.banglapanjika;
 
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.GregorianCalendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -179,7 +181,7 @@ final class Festivals {
     }
 
     // ------------------------------------------------------------------ the answer for one day
-    static List<String> forDay(int y, int mo, int d, String method, Panjika.Result bn) {
+    private static List<String> baseForDay(int y, int mo, int d, String method, Panjika.Result bn) {
         List<String> out = new ArrayList<>();
         Panjika.Model model = Panjika.modelFor(method);
         long today = dayNo(y, mo, d);
@@ -211,6 +213,54 @@ final class Festivals {
                 hit = mo == f.a && d == f.b;
             }
             if (hit) out.add(f.name + " — " + f.where);
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------ with the other method's date, when it differs
+    private static String methodName(String m) {
+        return DayInfo.SURYA.equals(m) ? "সূর্যসিদ্ধান্ত" : "দৃকসিদ্ধান্ত";
+    }
+
+    private static List<String> namesOn(Calendar c, String method) {
+        int y = c.get(Calendar.YEAR), m = c.get(Calendar.MONTH) + 1, d = c.get(Calendar.DAY_OF_MONTH);
+        return baseForDay(y, m, d, method, Panjika.compute(y, m, d, method));
+    }
+
+    private static String dateText(Calendar c) {
+        return BanglaText.WEEKDAYS[c.get(Calendar.DAY_OF_WEEK) - 1] + ", " + BanglaText.digits(c.get(Calendar.DAY_OF_MONTH)) + " "
+                + BanglaText.MONTHS[c.get(Calendar.MONTH)] + " " + BanglaText.digits(c.get(Calendar.YEAR));
+    }
+
+    /** the date (within 3 days of c) on which this method puts the festival, or null */
+    private static Calendar findOther(String full, Calendar c, String method) {
+        for (int k = -3; k <= 3; k++) {
+            Calendar x = (Calendar) c.clone();
+            x.add(Calendar.DAY_OF_MONTH, k);
+            if (namesOn(x, method).contains(full)) return x;
+        }
+        return null;
+    }
+
+    /**
+     * Festivals of the day by the chosen method. When the other method (Surya / Drik Siddhanta) puts a festival on a different day,
+     * the entry says on which date.
+     */
+    static List<String> forDay(int y, int mo, int d, String method, Panjika.Result bn) {
+        List<String> mine = baseForDay(y, mo, d, method, bn);
+        String other = DayInfo.SURYA.equals(method) ? DayInfo.DRIK : DayInfo.SURYA;
+        Calendar today = new GregorianCalendar(y, mo - 1, d);
+        List<String> theirs = namesOn(today, other);
+        List<String> out = new ArrayList<>();
+        for (String f : mine) {
+            if (theirs.contains(f)) { out.add(f); continue; }
+            Calendar o = findOther(f, today, other);
+            out.add(o == null ? f : f + " [" + methodName(other) + " মতে: " + dateText(o) + "]");
+        }
+        for (String f : theirs) {
+            if (mine.contains(f)) continue;
+            Calendar o = findOther(f, today, method);
+            if (o != null) out.add(f + " [" + methodName(other) + " মতে আজ; " + methodName(method) + " মতে: " + dateText(o) + "]");
         }
         return out;
     }

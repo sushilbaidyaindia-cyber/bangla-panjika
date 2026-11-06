@@ -16,7 +16,7 @@ final class Surya implements Panjika.Model {
     static final double SUN_ANOM_OFF = 0.78575, MOON_OFF = 0.0, MOON_ANOM_OFF = 0.75;
     static final double EPOCH = 588465.5;                    // Kali Yuga: 18 Feb 3102 BCE (Julian) 0:00, Julian day
     static final double UJJAIN = 75.7683 / 360.0;            // Ujjain longitude as a fraction of a day
-    static final double SUN_FIX = -0.05, MOON_FIX = -0.15;
+    static final double SUN_FIX = -0.05, MOON_FIX = -0.117;
 
     private static double rev(double x) { return 360.0 * (x - Math.floor(x)); }
 

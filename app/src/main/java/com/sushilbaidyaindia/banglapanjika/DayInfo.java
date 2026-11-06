@@ -62,9 +62,7 @@ final class DayInfo {
         long dn = Panjika.civilDay(Sky.localMidnight(year, month, day) + 0.25);
         r.add(new String[]{"বাংলা", BanglaText.digits(c.monthDay) + " " + Panjika.BENGALI_MONTHS[c.monthIndex] + " " + BanglaText.digits(c.bangaYear)});
         r.add(new String[]{"শকাব্দ", BanglaText.digits(c.shakaYear)});
-        r.add(new String[]{"পঞ্জিকা", SURYA.equals(method)
-                ? "সূর্যসিদ্ধান্ত (কলকাতার সূর্যোদয়ে; ছাপা পঞ্জিকাভেদে কয়েক মিনিট থেকে ঘণ্টাখানেক পার্থক্য হতে পারে)"
-                : "দৃকসিদ্ধান্ত (আকাশের হিসাব, কলকাতা)"});
+        r.add(new String[]{"পঞ্জিকা", methodName(method)});
         r.add(new String[]{"সূর্যোদয়", Panjika.timeText(c.sunrise, dn)});
         r.add(new String[]{"সূর্যাস্ত", Panjika.timeText(c.sunset, dn)});
         r.add(new String[]{"তিথি", withEnd(c.tithiName, c.tithiEnd, c.tithiNext)});
