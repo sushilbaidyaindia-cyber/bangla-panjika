@@ -35,6 +35,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.ViewCompat;
@@ -127,6 +128,20 @@ public class MainActivity extends AppCompatActivity {
                 @Override public void onDone(String id) { runOnUiThread(() -> setReading(false)); }
                 @Override public void onError(String id) { runOnUiThread(() -> setReading(false)); }
             });
+        });
+
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // Search/settings tab or another day → return to today's day page
+                if (tab != 0 || !isToday()) {
+                    goTo(Calendar.getInstance());
+                    return;
+                }
+                // Already on today's page → exit app
+                setEnabled(false);
+                getOnBackPressedDispatcher().onBackPressed();
+            }
         });
 
         if (!prefs.contains("method")) askMethod();
